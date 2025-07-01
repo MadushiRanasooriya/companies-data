@@ -30,41 +30,21 @@ def get_deals_with_companies():
         "properties": "dealstage"
     }
 
-    deals = []
+    all_deals = []
     while True:
         response = requests.get(url, headers=HEADERS, params=params)
         data = response.json()
-        deals.extend(data.get("results", []))
+        all_deals.extend(data.get("results", []))
 
         if "paging" in data and "next" in data["paging"]:
             params["after"] = data["paging"]["next"]["after"]
         else:
             break
 
-    stage_labels = get_stage_labels()
+    return all_deals
 
-    company_ids = set()
-    unknown_count = 0
-
-    for deal in deals:
-        props = deal.get("properties", {})
-        stage_id = props.get("dealstage", "Unknown")
-        stage_name = stage_labels.get(stage_id, "Unknown")
-
-        if stage_name == "DEAL CLOSED - WON":
-            associations = deal.get("associations", {})
-            companies = associations.get("companies", {}).get("results", [])
-
-            if companies:
-                for company in companies:
-                    company_ids.add(company["id"])
-            else:
-                unknown_count += 1
-
-    return list(company_ids), unknown_count
-
-def get_companies_by_ids(company_ids, unknown_count):
-    industry_counts = {}
+def get_company_industries(company_ids):
+    industries = {}
 
     for i in range(0, len(company_ids), 100):
         batch = company_ids[i:i+100]
@@ -78,23 +58,53 @@ def get_companies_by_ids(company_ids, unknown_count):
         data = response.json()
 
         for company in data.get("results", []):
+            cid = company.get("id")
             industry = company.get("properties", {}).get("industry") or "Unknown"
-            industry_counts[industry] = industry_counts.get(industry, 0) + 1
+            industries[cid] = industry
 
-    # Add deals with no associated company under 'Unknown'
-    industry_counts["Unknown"] = industry_counts.get("Unknown", 0) + unknown_count
-
-    return industry_counts
+    return industries
 
 @app.route("/")
 def industry_counts_for_deal_closed_won():
-    company_ids, unknown_count = get_deals_with_companies()
-    counts = get_companies_by_ids(company_ids, unknown_count)
-    return jsonify(counts)
+    stage_labels = get_stage_labels()
+    all_deals = get_deals_with_companies()
+
+    # Filter to only DEAL CLOSED - WON deals
+    closed_won_deals = []
+    company_ids_needed = set()
+
+    for deal in all_deals:
+        props = deal.get("properties", {})
+        stage_id = props.get("dealstage")
+        stage_name = stage_labels.get(stage_id, "Unknown")
+
+        if stage_name == "DEAL CLOSED - WON":
+            associations = deal.get("associations", {})
+            companies = associations.get("companies", {}).get("results", [])
+            deal_entry = {
+                "id": deal.get("id"),
+                "company_id": companies[0]["id"] if companies else None
+            }
+            closed_won_deals.append(deal_entry)
+            if companies:
+                company_ids_needed.add(companies[0]["id"])
+
+    # Get industries for all needed companies
+    company_industries = get_company_industries(list(company_ids_needed))
+
+    # Count industries per deal
+    industry_counts = {}
+    for deal in closed_won_deals:
+        company_id = deal["company_id"]
+        industry = company_industries.get(company_id, "Unknown")
+        industry_counts[industry] = industry_counts.get(industry, 0) + 1
+
+    return jsonify(industry_counts)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 # import requests
