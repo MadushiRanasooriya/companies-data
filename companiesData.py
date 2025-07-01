@@ -41,7 +41,7 @@ def get_companies():
 
     return all_companies
 
-@app.route("/companies")
+@app.route("/")
 def companies():
     companies = get_companies()
     return jsonify(companies)
