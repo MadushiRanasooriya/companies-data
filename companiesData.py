@@ -12,39 +12,85 @@ HEADERS = {
     "Authorization": f"Bearer {HUBSPOT_TOKEN}"
 }
 
-def get_companies():
-    url = "https://api.hubapi.com/crm/v3/objects/companies"
-    headers = HEADERS
+def get_stage_labels():
+    url = "https://api.hubapi.com/crm/v3/pipelines/deals"
+    response = requests.get(url, headers=HEADERS)
+    data = response.json()
+    
+    stage_map = {}
+    for stage in data["results"][0]["stages"]:
+        stage_map[stage["id"]] = stage["label"]
+    return stage_map
+
+def get_deals_with_companies():
+    url = "https://api.hubapi.com/crm/v3/objects/deals"
     params = {
-        "properties": "name,industry",
-        "limit": 100
+        "limit": 100,
+        "associations": "companies",
+        "properties": "dealstage"
     }
 
-    all_companies = []
-
+    deals = []
     while True:
-        response = requests.get(url, headers=headers, params=params)
+        response = requests.get(url, headers=HEADERS, params=params)
         data = response.json()
-
-        for company in data.get("results", []):
-            company_info = {
-                "id": company.get("id", "Unknown"),
-                "name": company.get("properties", {}).get("name", "Unknown"),
-                "industry": company.get("properties", {}).get("industry", "Unknown")
-            }
-            all_companies.append(company_info)
+        deals.extend(data.get("results", []))
 
         if "paging" in data and "next" in data["paging"]:
             params["after"] = data["paging"]["next"]["after"]
         else:
             break
 
-    return all_companies
+    stage_labels = get_stage_labels()
+
+    company_ids = set()
+    unknown_count = 0
+
+    for deal in deals:
+        props = deal.get("properties", {})
+        stage_id = props.get("dealstage", "Unknown")
+        stage_name = stage_labels.get(stage_id, "Unknown")
+
+        if stage_name == "DEAL CLOSED - WON":
+            associations = deal.get("associations", {})
+            companies = associations.get("companies", {}).get("results", [])
+
+            if companies:
+                for company in companies:
+                    company_ids.add(company["id"])
+            else:
+                unknown_count += 1
+
+    return list(company_ids), unknown_count
+
+def get_companies_by_ids(company_ids, unknown_count):
+    industry_counts = {}
+
+    for i in range(0, len(company_ids), 100):
+        batch = company_ids[i:i+100]
+        url = "https://api.hubapi.com/crm/v3/objects/companies/batch/read"
+        payload = {
+            "properties": ["industry"],
+            "inputs": [{"id": cid} for cid in batch]
+        }
+
+        response = requests.post(url, headers=HEADERS, json=payload)
+        data = response.json()
+
+        for company in data.get("results", []):
+            industry = company.get("properties", {}).get("industry") or "Unknown"
+            industry_counts[industry] = industry_counts.get(industry, 0) + 1
+
+    # Add deals with no associated company under 'Unknown'
+    industry_counts["Unknown"] = industry_counts.get("Unknown", 0) + unknown_count
+
+    return industry_counts
 
 @app.route("/")
-def companies():
-    companies = get_companies()
-    return jsonify(companies)
+def industry_counts_for_deal_closed_won():
+    company_ids, unknown_count = get_deals_with_companies()
+    counts = get_companies_by_ids(company_ids, unknown_count)
+    return jsonify(counts)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
