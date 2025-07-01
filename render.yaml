@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: companies-data-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python companiesData.py
