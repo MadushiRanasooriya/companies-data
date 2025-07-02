@@ -22,7 +22,7 @@ def get_stage_labels():
         stage_map[stage["id"]] = stage["label"]
     return stage_map
 
-def get_deals_with_companies():
+def get_all_deals():
     url = "https://api.hubapi.com/crm/v3/objects/deals"
     params = {
         "limit": 100,
@@ -67,7 +67,7 @@ def get_company_industries(company_ids):
 @app.route("/")
 def industry_counts_for_deal_closed_won():
     stage_labels = get_stage_labels()
-    all_deals = get_deals_with_companies()
+    all_deals = get_all_deals()
 
     # Filter to only DEAL CLOSED - WON deals
     closed_won_deals = []
@@ -96,7 +96,7 @@ def industry_counts_for_deal_closed_won():
     industry_counts = {}
     for deal in closed_won_deals:
         company_id = deal["company_id"]
-        industry = company_industries.get(company_id, "Unknown")
+        industry = company_industries.get(company_id, "UNKNOWN")
         industry_counts[industry] = industry_counts.get(industry, 0) + 1
 
     return jsonify(industry_counts)
